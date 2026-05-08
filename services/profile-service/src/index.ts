@@ -1,0 +1,66 @@
+import express from 'express';
+import { logger } from './logger';
+import { pool } from './db';
+import { router, observe, errorHandler } from './routes';
+
+const PORT = parseInt(process.env.PORT || '3001', 10);
+const HOST = '0.0.0.0';
+
+const app = express();
+
+// Permissive CORS — fine for a class project with a known browser origin.
+// In production you'd lock this down to the recipient/giver UI hostname.
+app.use((req, res, next) => {
+  res.setHeader('access-control-allow-origin', '*');
+  res.setHeader(
+    'access-control-allow-headers',
+    'content-type, x-owner-token, x-request-id',
+  );
+  res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
+
+app.use(express.json({ limit: '64kb' }));
+app.use(observe);
+app.use(router);
+app.use(errorHandler);
+
+const server = app.listen(PORT, HOST, () => {
+  logger.info({ port: PORT }, 'profile-service listening');
+});
+
+// -----------------------------------------------------------------------------
+// Graceful shutdown for Kubernetes rolling updates.
+// On SIGTERM the kubelet stops sending new traffic; we then drain in-flight
+// requests, close the DB pool, and exit. EKS gives us up to
+// terminationGracePeriodSeconds to do this (default 30s).
+// -----------------------------------------------------------------------------
+async function shutdown(signal: string) {
+  logger.info({ signal }, 'shutting down');
+  server.close(async (err) => {
+    if (err) logger.error({ err }, 'error closing http server');
+    try {
+      await pool.end();
+    } catch (err) {
+      logger.error({ err }, 'error closing pg pool');
+    }
+    process.exit(err ? 1 : 0);
+  });
+  // Hard timeout in case something is wedged.
+  setTimeout(() => {
+    logger.warn('forced exit after shutdown timeout');
+    process.exit(1);
+  }, 25_000).unref();
+}
+
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
+
+process.on('unhandledRejection', (reason) => {
+  logger.error({ reason }, 'unhandled rejection');
+});
+process.on('uncaughtException', (err) => {
+  logger.fatal({ err }, 'uncaught exception, exiting');
+  process.exit(1);
+});

@@ -1,0 +1,118 @@
+services:
+  # --------------------------------------------------------------------
+  # Postgres — local only. In production this is replaced by RDS.
+  # --------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-giftgauge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-giftgauge}
+      POSTGRES_DB: ${POSTGRES_DB:-giftgauge}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-giftgauge} -d ${POSTGRES_DB:-giftgauge}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # --------------------------------------------------------------------
+  # Migrator — runs SQL migrations once, then exits.
+  # In EKS this maps to a one-shot Job that runs before the rollout.
+  # --------------------------------------------------------------------
+  migrator:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://giftgauge:giftgauge@db:5432/giftgauge}
+    volumes:
+      - ./database/migrations:/migrations:ro
+      - ./scripts/migrate.sh:/migrate.sh:ro
+    entrypoint: ["/bin/sh", "/migrate.sh"]
+
+  # --------------------------------------------------------------------
+  # profile-service
+  # --------------------------------------------------------------------
+  profile-service:
+    build:
+      context: ./services/profile-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      PORT: ${PROFILE_SERVICE_PORT:-3001}
+      DATABASE_URL: ${DATABASE_URL:-postgres://giftgauge:giftgauge@db:5432/giftgauge}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVICE_NAME: profile-service
+    ports:
+      - "${PROFILE_SERVICE_PORT:-3001}:${PROFILE_SERVICE_PORT:-3001}"
+
+  # --------------------------------------------------------------------
+  # sharing-service
+  # --------------------------------------------------------------------
+  sharing-service:
+    build:
+      context: ./services/sharing-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      PORT: ${SHARING_SERVICE_PORT:-3002}
+      DATABASE_URL: ${DATABASE_URL:-postgres://giftgauge:giftgauge@db:5432/giftgauge}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVICE_NAME: sharing-service
+    ports:
+      - "${SHARING_SERVICE_PORT:-3002}:${SHARING_SERVICE_PORT:-3002}"
+
+  # --------------------------------------------------------------------
+  # scoring-service
+  # --------------------------------------------------------------------
+  scoring-service:
+    build:
+      context: ./services/scoring-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      PORT: ${SCORING_SERVICE_PORT:-3003}
+      DATABASE_URL: ${DATABASE_URL:-postgres://giftgauge:giftgauge@db:5432/giftgauge}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVICE_NAME: scoring-service
+      AI_MODE: ${AI_MODE:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    ports:
+      - "${SCORING_SERVICE_PORT:-3003}:${SCORING_SERVICE_PORT:-3003}"
+
+  # --------------------------------------------------------------------
+  # frontend (Vite dev server in the container)
+  # --------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      VITE_PROFILE_API_URL: ${VITE_PROFILE_API_URL:-http://localhost:3001}
+      VITE_SHARING_API_URL: ${VITE_SHARING_API_URL:-http://localhost:3002}
+      VITE_SCORING_API_URL: ${VITE_SCORING_API_URL:-http://localhost:3003}
+    ports:
+      - "5173:5173"
+    depends_on:
+      - profile-service
+      - sharing-service
+      - scoring-service
+
+volumes:
+  db_data:

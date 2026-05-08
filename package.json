@@ -1,0 +1,16 @@
+{
+  "name": "giftgauge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GiftGauge - score gift ideas privately. Application code only; DevOps layer is built separately.",
+  "workspaces": [
+    "apps/*",
+    "services/*"
+  ],
+  "scripts": {
+    "up": "docker compose up --build",
+    "down": "docker compose down",
+    "reset": "docker compose down -v && docker compose up --build",
+    "logs": "docker compose logs -f"
+  }
+}
