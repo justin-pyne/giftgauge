@@ -1,0 +1,57 @@
+# =============================================================================
+# CI — runs on every PR and on every push to main.
+#
+# Verifies each service's Docker image still builds. Does NOT push.
+# Pushing happens in release.yml on push-to-main only.
+#
+# Why a matrix: each service builds independently and in parallel, so a
+# breakage in one service is reported clearly and doesn't slow the others.
+# =============================================================================
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel older runs if a newer commit is pushed to the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.service.name }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: frontend
+            context: apps/frontend
+          - name: profile
+            context: services/profile-service
+          - name: sharing
+            context: services/sharing-service
+          - name: scoring
+            context: services/scoring-service
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: set up docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: build ${{ matrix.service.name }} (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service.context }}
+          platforms: linux/amd64
+          push: false
+          # Use GitHub Actions cache for layer caching across runs.
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,scope=${{ matrix.service.name }},mode=max

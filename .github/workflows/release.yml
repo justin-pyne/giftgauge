@@ -1,0 +1,188 @@
+# =============================================================================
+# Release — push-to-main → build, push, dispatch.
+#
+# Triggered on push to main. The workflow:
+#   1. Reads the version from the VERSION file (e.g., v0.1.0)
+#   2. Logs in to ECR
+#   3. Builds each service for linux/amd64 (EKS nodes are amd64)
+#   4. Pushes each as <ecr_url>/giftgauge-<svc>:<VERSION>
+#   5. Sends a repository_dispatch event to giftgauge-infra to deploy dev
+#
+# Image tag immutability: a given VERSION value should be built and pushed
+# ONCE. To release a new version, bump VERSION (e.g., v0.1.0 → v0.1.1) in a
+# new commit. Re-pushing with the same tag would defeat semver promotion.
+#
+# This workflow does NOT push if the VERSION-tagged image already exists in
+# ECR — it skips with a warning instead.
+# =============================================================================
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# Don't run two releases at once.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: build and push images
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      version: ${{ steps.read-version.outputs.version }}
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: read version
+        id: read-version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "::error::VERSION file is empty"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: $VERSION"
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            us-east-1
+
+      - name: login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: set up docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ---------- frontend ----------
+      - name: check if frontend image exists
+        id: check-frontend
+        run: |
+          if aws ecr describe-images \
+            --repository-name giftgauge-frontend \
+            --image-ids imageTag=${{ steps.read-version.outputs.version }} \
+            --region us-east-1 >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::giftgauge-frontend:${{ steps.read-version.outputs.version }} already exists in ECR — skipping build to preserve immutability"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build and push frontend
+        if: steps.check-frontend.outputs.exists == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/frontend
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/giftgauge-frontend:${{ steps.read-version.outputs.version }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      # ---------- profile ----------
+      - name: check if profile image exists
+        id: check-profile
+        run: |
+          if aws ecr describe-images \
+            --repository-name giftgauge-profile \
+            --image-ids imageTag=${{ steps.read-version.outputs.version }} \
+            --region us-east-1 >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::giftgauge-profile:${{ steps.read-version.outputs.version }} already exists in ECR — skipping"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build and push profile
+        if: steps.check-profile.outputs.exists == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/profile-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/giftgauge-profile:${{ steps.read-version.outputs.version }}
+          cache-from: type=gha,scope=profile
+          cache-to: type=gha,scope=profile,mode=max
+
+      # ---------- sharing ----------
+      - name: check if sharing image exists
+        id: check-sharing
+        run: |
+          if aws ecr describe-images \
+            --repository-name giftgauge-sharing \
+            --image-ids imageTag=${{ steps.read-version.outputs.version }} \
+            --region us-east-1 >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::giftgauge-sharing:${{ steps.read-version.outputs.version }} already exists in ECR — skipping"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build and push sharing
+        if: steps.check-sharing.outputs.exists == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/sharing-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/giftgauge-sharing:${{ steps.read-version.outputs.version }}
+          cache-from: type=gha,scope=sharing
+          cache-to: type=gha,scope=sharing,mode=max
+
+      # ---------- scoring ----------
+      - name: check if scoring image exists
+        id: check-scoring
+        run: |
+          if aws ecr describe-images \
+            --repository-name giftgauge-scoring \
+            --image-ids imageTag=${{ steps.read-version.outputs.version }} \
+            --region us-east-1 >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::giftgauge-scoring:${{ steps.read-version.outputs.version }} already exists in ECR — skipping"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build and push scoring
+        if: steps.check-scoring.outputs.exists == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: services/scoring-service
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/giftgauge-scoring:${{ steps.read-version.outputs.version }}
+          cache-from: type=gha,scope=scoring
+          cache-to: type=gha,scope=scoring,mode=max
+
+  dispatch:
+    name: dispatch deploy to infra
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: dispatch deploy event
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          # PAT with `Contents: read/write` on the giftgauge-infra repo.
+          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          repository: justin-pyne/giftgauge-infra
+          event-type: app-released
+          client-payload: |
+            {
+              "version": "${{ needs.release.outputs.version }}",
+              "commit_sha": "${{ github.sha }}",
+              "commit_message": ${{ toJSON(github.event.head_commit.message) }}
+            }
