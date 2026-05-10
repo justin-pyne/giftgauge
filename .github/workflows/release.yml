@@ -20,7 +20,7 @@ name: release
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 # Don't run two releases at once.
 concurrency:

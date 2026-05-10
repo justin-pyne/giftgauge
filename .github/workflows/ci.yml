@@ -12,9 +12,9 @@ name: ci
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
   push:
-    branches: [main]
+    branches: [master]
 
 # Cancel older runs if a newer commit is pushed to the same branch.
 concurrency:
