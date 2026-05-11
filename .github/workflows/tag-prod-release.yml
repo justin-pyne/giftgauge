@@ -2,13 +2,8 @@
 # Tag-driven prod release dispatch.
 #
 # Fires when a git tag matching v*.*.* is pushed to the app repo.
-# Verifies the corresponding image tag exists in ECR (the master push that
-# introduced this VERSION should have already built it), then dispatches a
+# Verifies the corresponding image tag exists in ECR, then dispatches a
 # `prod-release-requested` event to the infra repo.
-#
-# Why no build step here: image immutability. The image was built once on
-# master push and lived in ECR before the tag was created. Re-building on
-# tag would risk shipping different bytes than what was tested in qa/uat.
 # =============================================================================
 
 name: tag-prod-release

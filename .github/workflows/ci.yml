@@ -2,10 +2,6 @@
 # CI — runs on every PR and on every push to main.
 #
 # Verifies each service's Docker image still builds. Does NOT push.
-# Pushing happens in release.yml on push-to-main only.
-#
-# Why a matrix: each service builds independently and in parallel, so a
-# breakage in one service is reported clearly and doesn't slow the others.
 # =============================================================================
 
 name: ci

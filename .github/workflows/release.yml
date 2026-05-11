@@ -8,10 +8,6 @@
 #   4. Pushes each as <ecr_url>/giftgauge-<svc>:<VERSION>
 #   5. Sends a repository_dispatch event to giftgauge-infra to deploy dev
 #
-# Image tag immutability: a given VERSION value should be built and pushed
-# ONCE. To release a new version, bump VERSION (e.g., v0.1.0 → v0.1.1) in a
-# new commit. Re-pushing with the same tag would defeat semver promotion.
-#
 # This workflow does NOT push if the VERSION-tagged image already exists in
 # ECR — it skips with a warning instead.
 # =============================================================================
@@ -22,7 +18,6 @@ on:
   push:
     branches: [master]
 
-# Don't run two releases at once.
 concurrency:
   group: release-main
   cancel-in-progress: false
