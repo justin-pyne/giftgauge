@@ -1,6 +1,5 @@
 # =============================================================================
 # CI — runs on every PR and on every push to main.
-#
 # Verifies each service's Docker image still builds. Does NOT push.
 # =============================================================================
 
